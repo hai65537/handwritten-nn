@@ -7,9 +7,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#if USE_CBLAS
-#include <cblas.h>
-#endif
 #if USE_PNG
 #include <png.h>
 #endif
@@ -103,20 +100,13 @@ static inline double crossentropy(float *y, int8_t t) {
 
 /// X = alpha*X
 void my_sscal(int N, float alpha, float *X) {
-#if USE_CBLAS
-    cblas_sscal(N, alpha, X, 1);
-#else
     for (int i = 0; i < N; ++i) {
         X[i] *= alpha;
     }
-#endif
 }
 
 /// index of max abs value
 int my_isamax(int N, const float *X) {
-#if USE_CBLAS
-    return cblas_isamax(N, X, 1);
-#else
     int ret = 0;
     for (int i = 1; i < N; ++i) {
         if (fabs(X[ret]) < fabs(X[i])) {
@@ -124,39 +114,27 @@ int my_isamax(int N, const float *X) {
         }
     }
     return ret;
-#endif
 }
 
 /// Y = alpha*X + Y
 void my_saxpy(int n, float alpha, const float *X, float *Y) {
-#if USE_CBLAS
-    cblas_saxpy(n, alpha, X, 1, Y, 1);
-#else
     for (int i = 0; i < n; ++i) {
         // Y[i] += alpha * X[i];
         Y[i] = fma(alpha, X[i], Y[i]);
     }
-#endif
 }
 
 /// dot product
 float my_sdot(int n, const float *X, const float *Y) {
-#if USE_CBLAS
-    return cblas_sdot(n, X, 1, Y, 1);
-#else
     float ret = 0;
     for (int i = 0; i < n; ++i) {
         ret = fmaf(X[i], Y[i], ret);
     }
     return ret;
-#endif
 }
 
 /// y = alpha*A*x + beta*y
 void my_sgemv(int M, int N, float alpha, const float *A, const float *x, float beta, float *y) {
-#if USE_CBLAS
-    cblas_sgemv(CblasRowMajor, CblasNoTrans, M, N, alpha, A, N, x, 1, beta, y, 1);
-#else
     my_sscal(M, beta, y);
     for (int m = 0; m < M; ++m) {
         // for (int n = 0; n < N; ++n) {
@@ -164,28 +142,20 @@ void my_sgemv(int M, int N, float alpha, const float *A, const float *x, float b
         // }
         y[m] = fmaf(alpha, my_sdot(N, A + m * N, x), y[m]);
     }
-#endif
 }
 
 /// A = alpha*X*Y^t + A
 void my_sger(int M, int N, float alpha, const float *X, const float *Y, float *A) {
-#if USE_CBLAS
-    cblas_sger(CblasRowMajor, M, N, alpha, X, 1, Y, 1, A, M);
-#else
     for (int m = 0; m < M; ++m) {
         for (int n = 0; n < N; ++n) {
             A[m * N + n] = fmaf(alpha, X[m] * Y[n], A[m * N + n]);
         }
     }
-#endif
 }
 
 /// C = alpha*A*B + beta*C; A: R^{M*K}; B: R^{K*N}; C: R^{M*N}
 void my_sgemm(
   int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C) {
-#if USE_CBLAS
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, alpha, A, M, B, N, beta, C, M);
-#else
     my_sscal(M * N, beta, C);
     for (int m = 0; m < M; ++m) {
         for (int n = 0; n < N; ++n) {
@@ -194,7 +164,6 @@ void my_sgemm(
             }
         }
     }
-#endif
 }
 
 // }}} blas
@@ -675,7 +644,7 @@ void mnist_save_images(void) {
 #define FC2_COLS FC1_ROWS
 #define FC2_SIZE (FC2_ROWS * FC2_COLS)
 
-#define BATCH_SIZE 300
+#define BATCH_SIZE 100
 
 typedef enum Mode {
     kTrain,
@@ -737,9 +706,9 @@ static void finalize(Mode mode) {
                 free(fc_dW[i][j]);
                 free(fc_db[i][j]);
             }
+            free(momentum_W[i]);
+            free(momentum_b[i]);
         }
-        free(momentum_W[i]);
-        free(momentum_b[i]);
     }
 }
 
