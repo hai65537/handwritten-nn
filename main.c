@@ -398,11 +398,9 @@ void mnist_filter(int rows, int cols, float *data) {
             int idx = is_neg ? i : rows - i - 1;
             int move_to = idx + dr;
             if (move_to >= rows || move_to < 0) {
-                // data[idx * cols + j] = 0;
                 continue;
             }
             data[move_to * cols + j] = data[idx * cols + j];
-            // data[idx * cols + j] = 0;
         }
     }
 
@@ -412,11 +410,9 @@ void mnist_filter(int rows, int cols, float *data) {
             int idx = is_neg ? j : cols - j - 1;
             int move_to = idx + dc;
             if (move_to >= cols || move_to < 0) {
-                // data[i * cols + idx] = 0;
                 continue;
             }
             data[i * cols + move_to] = data[i * cols + idx];
-            // data[i * cols + idx] = 0;
         }
     }
 }
