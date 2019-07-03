@@ -1,0 +1,13 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+AlignAfterOpenBracket: AlwaysBreak
+AlignEscapedNewlines: DontAlign
+AlignOperands: true
+AllowShortFunctionsOnASingleLine: Empty
+BreakBeforeBinaryOperators: All
+ColumnLimit: 100
+ContinuationIndentWidth: 2
+IndentWidth: 4
+UseTab: Never
+...
