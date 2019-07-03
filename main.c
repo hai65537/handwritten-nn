@@ -61,12 +61,12 @@ int xorshift128(void) {
 /// convert between big and little endians
 int32_t convert_endian_i32(int32_t n) {
     union {
-        int32_t __n;
-        int8_t __b[4];
-    } __u = {.__n = n};
-    SWAP(int8_t, __u.__b[0], __u.__b[3]);
-    SWAP(int8_t, __u.__b[1], __u.__b[2]);
-    return __u.__n;
+        int32_t n;
+        int8_t b[4];
+    } u = {.n = n};
+    SWAP(int8_t, u.b[0], u.b[3]);
+    SWAP(int8_t, u.b[1], u.b[2]);
+    return u.n;
 }
 
 /// return uniform random number [0,1]
@@ -385,6 +385,10 @@ void mnist_filter(int rows, int cols, float *data) {
         }
     }
 }
+
+#if NO_FILTER
+#define mnist_filter ((void)0)
+#endif
 
 void mnist_save_bmp(int32_t width, int32_t height, const float *x, const char *fname) {
     FILE *fp = fopen(fname, "wb");
