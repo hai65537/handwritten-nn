@@ -387,7 +387,7 @@ void mnist_filter(int rows, int cols, float *data) {
 }
 
 #if NO_FILTER
-#define mnist_filter ((void)0)
+#define mnist_filter(r, c, d) ((void)0)
 #endif
 
 void mnist_save_bmp(int32_t width, int32_t height, const float *x, const char *fname) {
