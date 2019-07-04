@@ -188,7 +188,6 @@ typedef struct BMP_InfoHeader {
     int32_t important_colors;
 } BMP_InfoHeader;
 
-///
 typedef struct BMP_ColorPallet {
     uint32_t colors[256];
     size_t size;
@@ -561,7 +560,6 @@ void mnist_save_images(void) {
 // }}} mnist
 
 #define PARAMS_DIR DATA_DIR "params/"
-#define PARAM_FILE(s) PARAMS_DIR #s
 
 #define FC_LAYERS 3
 #define LAYERS (2 * FC_LAYERS)
@@ -649,7 +647,6 @@ static void load_param(float *dest, int len, const char *fname) {
     FILE *fp = fopen(str, "rb");
     if (!fp) {
         for (int i = 0; i < len; ++i) {
-            // dest[i] = random_uniform() * 2 - 1;
             dest[i] = 0.1 * random_normal();
         }
     } else {
@@ -757,7 +754,6 @@ void affine_bwd(
     memset(dx, 0, n * sizeof(float));
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < m; ++j) {
-            // dx[i] += W[j * n + i] * dy[j];
             dx[i] = fmaf(W[j * n + i], dy[j], dx[i]);
         }
     }
