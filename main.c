@@ -11,13 +11,7 @@
 #include <png.h>
 #endif
 
-#define SWAP(_T, __lhs, __rhs) \
-    do { \
-        _T __tmp = __lhs; \
-        __lhs = __rhs; \
-        __rhs = __tmp; \
-    } while (0)
-
+/// directory to store data
 #define DATA_DIR "data/"
 
 char *progname;
@@ -29,7 +23,31 @@ _Noreturn static void error(const char *str) {
     exit(1);
 }
 
-#if RAND_MAX != 0x7fffffff
+/// swap the values whose types are `_T`
+#define SWAP(_T, __lhs, __rhs) \
+    do { \
+        _T __tmp = __lhs; \
+        __lhs = __rhs; \
+        __rhs = __tmp; \
+    } while (0)
+
+/// convert between big and little endians
+int32_t convert_endian_i32(int32_t n) {
+    union {
+        int32_t n;
+        int8_t b[4];
+    } u = {.n = n};
+    SWAP(int8_t, u.b[0], u.b[3]);
+    SWAP(int8_t, u.b[1], u.b[2]);
+    return u.n;
+}
+
+// random {{{
+
+/// platform-independent pseudorandom number generator which aims to provide reproducibility
+#ifndef RAND_MAX
+#define RAND_MAX 0x7fffffff
+#elif RAND_MAX != 0x7fffffff
 #undef RAND_MAX
 #define RAND_MAX 0x7fffffff
 #endif
@@ -55,19 +73,9 @@ int xorshift128(void) {
 }
 #undef XS128
 
+/// override rand() and srand() provided by C standard library
 #define srand xorshift128_seed
 #define rand xorshift128
-
-/// convert between big and little endians
-int32_t convert_endian_i32(int32_t n) {
-    union {
-        int32_t n;
-        int8_t b[4];
-    } u = {.n = n};
-    SWAP(int8_t, u.b[0], u.b[3]);
-    SWAP(int8_t, u.b[1], u.b[2]);
-    return u.n;
-}
 
 /// return uniform random number [0,1]
 static inline double random_uniform(void) {
@@ -84,84 +92,68 @@ double random_normal(void) {
     return sqrt(-2 * log(x)) * cos(2 * pi * y);
 }
 
-void random_shuffle(int n, float **x, int8_t *y) {
-    for (int i = 0; i < n; ++i) {
-        int idx = rand() / (RAND_MAX + 1.0) * n;
-        SWAP(float *, x[i], x[idx]);
-        SWAP(int8_t, y[i], y[idx]);
-    }
-}
-
-static inline double crossentropy(float *y, int8_t t) {
-    return -log(y[t] + 1e-7);
-}
+// }}} random
 
 // blas {{{
 
 /// X = alpha*X
+/// - X: N vector
 void my_sscal(int N, float alpha, float *X) {
     for (int i = 0; i < N; ++i) {
         X[i] *= alpha;
     }
 }
 
-/// index of max abs value
-int my_isamax(int N, const float *X) {
-    int ret = 0;
+/// return index of max value
+/// - X: N vector
+/// **NOTE**: not provided by BLAS
+int my_ismax(int N, const float *X) {
+    int ix = 0;
     for (int i = 1; i < N; ++i) {
-        if (fabs(X[ret]) < fabs(X[i])) {
-            ret = i;
+        if (X[ix] < X[i]) {
+            ix = i;
         }
     }
-    return ret;
+    return ix;
 }
 
 /// Y = alpha*X + Y
-void my_saxpy(int n, float alpha, const float *X, float *Y) {
-    for (int i = 0; i < n; ++i) {
-        // Y[i] += alpha * X[i];
+/// - X,Y: N vector
+void my_saxpy(int N, float alpha, const float *X, float *Y) {
+    for (int i = 0; i < N; ++i) {
         Y[i] = fma(alpha, X[i], Y[i]);
     }
 }
 
 /// dot product
-float my_sdot(int n, const float *X, const float *Y) {
-    float ret = 0;
-    for (int i = 0; i < n; ++i) {
-        ret = fmaf(X[i], Y[i], ret);
+/// - X,Y: N vector
+float my_sdot(int N, const float *X, const float *Y) {
+    float sum = 0;
+    for (int i = 0; i < N; ++i) {
+        sum = fmaf(X[i], Y[i], sum);
     }
-    return ret;
+    return sum;
 }
 
-/// y = alpha*A*x + beta*y
-void my_sgemv(int M, int N, float alpha, const float *A, const float *x, float beta, float *y) {
-    my_sscal(M, beta, y);
+/// Y = alpha*A*X + beta*Y;
+/// - A: M*N matrix
+/// - X: N vector
+/// - Y: M vector
+void my_sgemv(int M, int N, float alpha, const float *A, const float *X, float beta, float *Y) {
+    my_sscal(M, beta, Y);
     for (int m = 0; m < M; ++m) {
-        // for (int n = 0; n < N; ++n) {
-        //     y[m] += alpha * A[m * N + n] * x[n];
-        // }
-        y[m] = fmaf(alpha, my_sdot(N, A + m * N, x), y[m]);
+        Y[m] = fmaf(alpha, my_sdot(N, A + m * N, X), Y[m]);
     }
 }
 
 /// A = alpha*X*Y^t + A
+/// - X: M vector
+/// - Y: N vector
+/// - A: M*N matrix
 void my_sger(int M, int N, float alpha, const float *X, const float *Y, float *A) {
     for (int m = 0; m < M; ++m) {
         for (int n = 0; n < N; ++n) {
             A[m * N + n] = fmaf(alpha, X[m] * Y[n], A[m * N + n]);
-        }
-    }
-}
-
-/// C = alpha*A*B + beta*C; A: R^{M*K}; B: R^{K*N}; C: R^{M*N}
-void my_sgemm(
-  int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C) {
-    my_sscal(M * N, beta, C);
-    for (int m = 0; m < M; ++m) {
-        for (int n = 0; n < N; ++n) {
-            for (int k = 0; k < K; ++k) {
-                C[m * N + n] = fmaf(alpha, A[m * K + k] * B[k * N + n], C[m * N + n]);
-            }
         }
     }
 }
@@ -196,17 +188,18 @@ typedef struct BMP_InfoHeader {
     int32_t important_colors;
 } BMP_InfoHeader;
 
+///
 typedef struct BMP_ColorPallet {
     uint32_t colors[256];
     size_t size;
 } BMP_ColorPallet;
 
 /// supports gray-scale only
-/// TODO: full support
+/// **TODO**: full support
 void BMP_init(BMP_Header *header, BMP_InfoHeader *info, BMP_ColorPallet *pallet) {
     union {
-        uint8_t c[2];
-        uint16_t s;
+        int8_t c[2];
+        int16_t s;
     } u = {.c = {'B', 'M'}};
 
     header->magic = u.s;
@@ -249,7 +242,7 @@ void BMP_init(BMP_Header *header, BMP_InfoHeader *info, BMP_ColorPallet *pallet)
 #define MNIST_IMAGE_SIZE (MNIST_IMAGE_ROWS * MNIST_IMAGE_COLS)
 
 static void mnist_load_image(float *image, int rows, int cols, FILE *fp) {
-    int size = rows * cols;
+    const int size = rows * cols;
     uint8_t *tmp = malloc(size * sizeof(*tmp));
     fread(tmp, sizeof(*tmp), size, fp);
     for (int i = 0; i < size; ++i) {
@@ -265,15 +258,10 @@ static void mnist_load_label(int8_t *label, FILE *fp) {
 void mnist_init(
   float **train_x, int8_t *train_y, int *train_count, float **test_x, int8_t *test_y,
   int *test_count, int *rows, int *cols) {
-    FILE *train_image;
-    FILE *train_label;
-    FILE *test_image;
-    FILE *test_label;
-
-    train_image = fopen(MNIST_TRAIN_IMAGES, "rb");
-    train_label = fopen(MNIST_TRAIN_LABELS, "rb");
-    test_image = fopen(MNIST_TEST_IMAGES, "rb");
-    test_label = fopen(MNIST_TEST_LABELS, "rb");
+    FILE *train_image = fopen(MNIST_TRAIN_IMAGES, "rb");
+    FILE *train_label = fopen(MNIST_TRAIN_LABELS, "rb");
+    FILE *test_image = fopen(MNIST_TEST_IMAGES, "rb");
+    FILE *test_label = fopen(MNIST_TEST_LABELS, "rb");
     if (!train_image || !train_label || !test_image || !test_label) {
         perror("MNIST");
         exit(1);
@@ -355,8 +343,7 @@ void mnist_filter(int rows, int cols, float *data) {
             }
         }
     }
-    assert(top < bottom);
-    assert(left < right);
+    assert(top <= bottom && left <= right);
 
     int dr = ((rows - bottom - 1) - top) / 2;
     int dc = ((cols - right - 1) - left) / 2;
@@ -638,10 +625,10 @@ void mnist_save_images(void) {
 
 #define FC_LAYERS 3
 #define LAYERS (2 * FC_LAYERS)
-#define FC0_ROWS 50
+#define FC0_ROWS 500
 #define FC0_COLS MNIST_IMAGE_SIZE
 #define FC0_SIZE (FC0_ROWS * FC0_COLS)
-#define FC1_ROWS 100
+#define FC1_ROWS 250
 #define FC1_COLS FC0_ROWS
 #define FC1_SIZE (FC1_ROWS * FC1_COLS)
 #define FC2_ROWS 10
@@ -723,7 +710,7 @@ static void load_param(float *dest, int len, const char *fname) {
     if (!fp) {
         for (int i = 0; i < len; ++i) {
             // dest[i] = random_uniform() * 2 - 1;
-            dest[i] = 0.5 * random_normal();
+            dest[i] = 0.1 * random_normal();
         }
     } else {
         fread(dest, sizeof(float), len, fp);
@@ -752,9 +739,20 @@ static void save_param(const float *src, int len, const char *fname) {
     fclose(fp);
 }
 
+void random_shuffle(int n, float **x, int8_t *y) {
+    for (int i = 0; i < n; ++i) {
+        int idx = rand() / (RAND_MAX + 1.0) * n;
+        SWAP(float *, x[i], x[idx]);
+        SWAP(int8_t, y[i], y[idx]);
+    }
+}
+
 // network {{{
 
 /// y = W*x + b
+/// - x: n vector
+/// - W: m*n matrix
+/// - b: m vector
 void affine(
   int m, int n, const float *restrict x, const float *restrict W, const float *restrict b,
   float *restrict y) {
@@ -762,14 +760,16 @@ void affine(
     my_sgemv(m, n, 1, W, x, 1, y);
 }
 
+/// y_i = max(x_i, 0)
 void relu(int n, const float *restrict x, float *restrict y) {
     for (int i = 0; i < n; ++i) {
         y[i] = x[i] > 0 ? x[i] : 0;
     }
 }
 
+/// y = exp(x .- max(x)) ./ sum(exp(x .- max(x)))
 void softmax(int n, const float *restrict x, float *restrict y) {
-    int idx = my_isamax(n, x);
+    int idx = my_ismax(n, x);
     double tmp = 0;
     for (int i = 0; i < n; ++i) {
         tmp += exp(x[i] - x[idx]);
@@ -779,6 +779,9 @@ void softmax(int n, const float *restrict x, float *restrict y) {
     }
 }
 
+/// dx = y - t
+/// - y: n vector
+/// - t: n one-hot vector
 void softmax_with_loss_bwd(int n, const float *restrict y, int8_t t, float *restrict dx) {
     for (int i = 0; i < n; ++i) {
         dx[i] = y[i] - (t == i ? 1 : 0);
@@ -791,6 +794,15 @@ void relu_bwd(int n, const float *restrict x, const float *restrict dy, float *r
     }
 }
 
+/// dW = dy * x^{T}
+/// db = dy
+/// dx = W^{T} * dy
+/// - x:  n vector
+/// - W:  m*n matrix
+/// - dy: m vector
+/// - dW: m*n matrix
+/// - db: m vector
+/// - dx: n vector
 void affine_bwd(
   int m, int n, const float *restrict x, const float *restrict W, const float *restrict dy,
   float *restrict dW, float *restrict db, float *restrict dx) {
@@ -809,6 +821,10 @@ void affine_bwd(
             dx[i] = fmaf(W[j * n + i], dy[j], dx[i]);
         }
     }
+}
+
+static inline double cross_entropy(float *y, int8_t t) {
+    return -log(y[t] + 1e-7);
 }
 
 // }}} network
@@ -859,9 +875,9 @@ static Result minibatch_train(float **x, const int8_t *t, float eta, float alpha
         softmax(dims[5].in, z[5], z[6]);
 
         float *y = z[LAYERS];
-        int idx = my_isamax(dims[LAYERS - 1].out, y);
+        int idx = my_ismax(dims[LAYERS - 1].out, y);
         c += idx == t[i];
-        l += crossentropy(y, t[i]);
+        l += cross_entropy(y, t[i]);
 
         float *dx[LAYERS];
         for (int j = 0; j < LAYERS; ++j) {
@@ -925,9 +941,9 @@ static Result inference(float *x, int8_t t) {
     softmax(dims[5].in, z[5], z[6]);
 
     float *y = z[LAYERS];
-    int idx = my_isamax(dims[LAYERS - 1].out, y);
+    int idx = my_ismax(dims[LAYERS - 1].out, y);
     c = idx == t;
-    l = crossentropy(y, t);
+    l = cross_entropy(y, t);
 
     for (int i = 1; i < LAYERS + 1; ++i) {
         free(z[i]);
@@ -972,6 +988,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
 
     load_params();
 
+    printf("epochs:\ttrain_acc\ttrain_loss\ttest_acc\ttest_loss\n");
     for (int e = 0; e < epochs; ++e) {
         int c = 0;
         double l = 0;
@@ -983,7 +1000,8 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
             l += r.loss;
         }
         printf(
-          "%d/%d: %.4f %.4f", e + 1, epochs, c / (double)MNIST_TRAIN_COUNT, l / MNIST_TRAIN_COUNT);
+          "%d/%d:\t%.4f\t%.4f", e + 1, epochs, c / (double)MNIST_TRAIN_COUNT,
+          l / MNIST_TRAIN_COUNT);
 
         c = 0;
         l = 0;
@@ -995,7 +1013,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
             c += r.count;
             l += r.loss;
         }
-        printf(" %.4f %.4f\n", c / (double)MNIST_TEST_COUNT, l / MNIST_TEST_COUNT);
+        printf("\t%.4f\t%.4f\n", c / (double)MNIST_TEST_COUNT, l / MNIST_TEST_COUNT);
     }
 
     save_params();
@@ -1018,7 +1036,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
     free(test_y);
 }
 
-void inference_main(char *fname) {
+void inference_from_file(char *fname) {
     FileType type;
     char *ext = NULL;
 
@@ -1056,26 +1074,35 @@ void inference_main(char *fname) {
     }
 
     mnist_filter(MNIST_IMAGE_ROWS, MNIST_IMAGE_COLS, x);
-    load_params();
     printf("%d\n", inference(x, -1).idx);
+    free(x);
+}
+
+void inference_main(int argc, char **argv) {
+    load_params();
+    for (int i = 0; i < argc; ++i) {
+        inference_from_file(argv[i]);
+    }
 }
 
 int print_usage(void) {
     fprintf(
       stderr,
-      "Usage: %s [OPTIONS]...\n"
-      "\nModes:\n"
-      "  -i FILE    inference from FILE;\n"
-      "               FILE must be 28*28 Windows Bitmap"
+      "Usage: %s [OPTION]... [FILE]...\n"
+      "Inference from each FILE when option `-i is specified.\n"
+      "Each FILE must be a 28*28 image file.\n"
+      "Supported file types:\n"
+      "  * Windows Bitmap\n"
 #if USE_PNG
-      " or PNG"
+      "  * PNG\n"
 #endif
-      "\n"
+      "\nModes:\n"
+      "  -i         inference from FILE;\n"
       "  -p         convert datasets to pictures\n"
-      "  -t         train (default)\n"
+      "  -t         train (default mode)\n"
       "\nParameters:\n"
-      "  -a NUMBER  momentum (default is 0.9)\n"
       "  -d NUMBER  decay for learning rate (default is 1e-6)\n"
+      "  -m NUMBER  momentum (default is 0.9)\n"
       "  -n NUMBER  number of epochs (default is 10)\n"
       "  -r NUMBER  learning rate (default is 0.01)\n"
       "  -s NUMBER  seed for random number (default is 42)\n"
@@ -1091,22 +1118,20 @@ int main(int argc, char **argv) {
     float decay = 1e-6;
     float alpha = 0.9;
     int seed = 42;
-    char *fname = NULL;
     Mode mode = kTrain;
     progname = argv[0];
 
     int c;
-    while ((c = getopt(argc, argv, "a:d:i:hn:pr:s:t")) != -1) {
+    while ((c = getopt(argc, argv, "d:ihm:n:pr:s:t")) != -1) {
         switch (c) {
-        case 'a':
-            alpha = strtof(optarg, NULL);
-            break;
         case 'd':
             decay = strtof(optarg, NULL);
             break;
         case 'i':
             mode = kInference;
-            fname = optarg;
+            break;
+        case 'm':
+            alpha = strtof(optarg, NULL);
             break;
         case 'n':
             epochs = strtol(optarg, NULL, 10);
@@ -1135,7 +1160,7 @@ int main(int argc, char **argv) {
         train_main(epochs, eta, decay, alpha, seed);
         break;
     case kInference:
-        inference_main(fname);
+        inference_main(argc - optind, argv + optind);
         break;
     case kSavePictures:
         mnist_save_images();
