@@ -1089,7 +1089,7 @@ int print_usage(void) {
     fprintf(
       stderr,
       "Usage: %s [OPTION]... [FILE]...\n"
-      "Inference from each FILE when option `-i is specified.\n"
+      "Inference from each FILE when option `-i` is specified.\n"
       "Each FILE must be a 28*28 image file.\n"
       "Supported file types:\n"
       "  * Windows Bitmap\n"
