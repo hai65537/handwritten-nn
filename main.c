@@ -317,66 +317,6 @@ void mnist_init(
     fclose(test_label);
 }
 
-void mnist_filter(int rows, int cols, float *data) {
-    int top = rows;
-    int bottom = 0;
-    int left = cols;
-    int right = 0;
-
-    for (int i = 0; i < rows; ++i) {
-        for (int j = 0; j < cols; ++j) {
-            data[i * cols + j] = data[i * cols + j] < 0.3 ? 0 : 1;
-            if (data[i * cols + j] == 0) {
-                continue;
-            }
-            if (top > i) {
-                top = i;
-            }
-            if (bottom < i) {
-                bottom = i;
-            }
-            if (left > j) {
-                left = j;
-            }
-            if (right < j) {
-                right = j;
-            }
-        }
-    }
-    assert(top <= bottom && left <= right);
-
-    int dr = ((rows - bottom - 1) - top) / 2;
-    int dc = ((cols - right - 1) - left) / 2;
-
-    int is_neg = dr < 0 ? 1 : 0;
-    for (int j = 0; j < cols; ++j) {
-        for (int i = 0; i < rows; ++i) {
-            int idx = is_neg ? i : rows - i - 1;
-            int move_to = idx + dr;
-            if (move_to >= rows || move_to < 0) {
-                continue;
-            }
-            data[move_to * cols + j] = data[idx * cols + j];
-        }
-    }
-
-    is_neg = dc < 0 ? 1 : 0;
-    for (int i = 0; i < rows; ++i) {
-        for (int j = 0; j < cols; ++j) {
-            int idx = is_neg ? j : cols - j - 1;
-            int move_to = idx + dc;
-            if (move_to >= cols || move_to < 0) {
-                continue;
-            }
-            data[i * cols + move_to] = data[i * cols + idx];
-        }
-    }
-}
-
-#if NO_FILTER
-#define mnist_filter(r, c, d) ((void)0)
-#endif
-
 void mnist_save_bmp(int32_t width, int32_t height, const float *x, const char *fname) {
     FILE *fp = fopen(fname, "wb");
     if (!fp) {
@@ -625,10 +565,10 @@ void mnist_save_images(void) {
 
 #define FC_LAYERS 3
 #define LAYERS (2 * FC_LAYERS)
-#define FC0_ROWS 500
+#define FC0_ROWS 50
 #define FC0_COLS MNIST_IMAGE_SIZE
 #define FC0_SIZE (FC0_ROWS * FC0_COLS)
-#define FC1_ROWS 250
+#define FC1_ROWS 100
 #define FC1_COLS FC0_ROWS
 #define FC1_SIZE (FC1_ROWS * FC1_COLS)
 #define FC2_ROWS 10
@@ -973,22 +913,9 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
     test_y = malloc(MNIST_TEST_COUNT * sizeof(int8_t));
     mnist_init(train_x, train_y, &train_count, test_x, test_y, &test_count, &rows, &cols);
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-    for (int i = 0; i < MNIST_TRAIN_COUNT; ++i) {
-        mnist_filter(rows, cols, train_x[i]);
-    }
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-    for (int i = 0; i < MNIST_TEST_COUNT; ++i) {
-        mnist_filter(rows, cols, test_x[i]);
-    }
-
     load_params();
 
-    printf("epochs:\ttrain_acc\ttrain_loss\ttest_acc\ttest_loss\n");
+    printf("epochs\ttrain_acc\ttrain_loss\ttest_acc\ttest_loss\n");
     for (int e = 0; e < epochs; ++e) {
         int c = 0;
         double l = 0;
@@ -1000,7 +927,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
             l += r.loss;
         }
         printf(
-          "%d/%d:\t%.4f\t%.4f", e + 1, epochs, c / (double)MNIST_TRAIN_COUNT,
+          "%d/%d\t%.4f\t\t%.4f", e + 1, epochs, c / (double)MNIST_TRAIN_COUNT,
           l / MNIST_TRAIN_COUNT);
 
         c = 0;
@@ -1013,7 +940,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
             c += r.count;
             l += r.loss;
         }
-        printf("\t%.4f\t%.4f\n", c / (double)MNIST_TEST_COUNT, l / MNIST_TEST_COUNT);
+        printf("\t\t%.4f\t\t%.4f\n", c / (double)MNIST_TEST_COUNT, l / MNIST_TEST_COUNT);
     }
 
     save_params();
@@ -1073,7 +1000,6 @@ void inference_from_file(char *fname) {
 #endif
     }
 
-    mnist_filter(MNIST_IMAGE_ROWS, MNIST_IMAGE_COLS, x);
     printf("%d\n", inference(x, -1).idx);
     free(x);
 }
@@ -1105,7 +1031,7 @@ int print_usage(void) {
       "  -m NUMBER  momentum (default is 0.9)\n"
       "  -n NUMBER  number of epochs (default is 10)\n"
       "  -r NUMBER  learning rate (default is 0.01)\n"
-      "  -s NUMBER  seed for random number (default is 42)\n"
+      "  -s NUMBER  seed for random number (default is 1)\n"
       "\n"
       "  -h         display this help and exit\n",
       progname);
@@ -1117,7 +1043,7 @@ int main(int argc, char **argv) {
     float eta = 0.01;
     float decay = 1e-6;
     float alpha = 0.9;
-    int seed = 42;
+    int seed = 1;
     Mode mode = kTrain;
     progname = argv[0];
 
