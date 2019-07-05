@@ -647,7 +647,12 @@ static void load_param(float *dest, int len, const char *fname) {
     FILE *fp = fopen(str, "rb");
     if (!fp) {
         for (int i = 0; i < len; ++i) {
-            dest[i] = 0.1 * random_normal();
+            dest[i] =
+#ifdef STDDEV
+              STDDEV * random_normal();
+#else
+              0.04 * random_normal();
+#endif
         }
     } else {
         fread(dest, sizeof(float), len, fp);
@@ -911,7 +916,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
 
     load_params();
 
-    printf("epochs\ttrain_acc\ttrain_loss\ttest_acc\ttest_loss\n");
+    printf("epochs,train_acc,train_loss,test_acc,test_loss\n");
     for (int e = 0; e < epochs; ++e) {
         int c = 0;
         double l = 0;
@@ -922,9 +927,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
             c += r.count;
             l += r.loss;
         }
-        printf(
-          "%d/%d\t%.4f\t\t%.4f", e + 1, epochs, c / (double)MNIST_TRAIN_COUNT,
-          l / MNIST_TRAIN_COUNT);
+        printf("%d,%.4f,%.4f", e + 1, c / (double)MNIST_TRAIN_COUNT, l / MNIST_TRAIN_COUNT);
 
         c = 0;
         l = 0;
@@ -936,7 +939,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
             c += r.count;
             l += r.loss;
         }
-        printf("\t\t%.4f\t\t%.4f\n", c / (double)MNIST_TEST_COUNT, l / MNIST_TEST_COUNT);
+        printf(",%.4f,%.4f\n", c / (double)MNIST_TEST_COUNT, l / MNIST_TEST_COUNT);
     }
 
     save_params();
