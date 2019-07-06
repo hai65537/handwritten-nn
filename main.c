@@ -23,12 +23,12 @@ _Noreturn static void error(const char *str) {
     exit(1);
 }
 
-/// swap the values whose types are `_T`
-#define SWAP(_T, __lhs, __rhs) \
+/// swap the values whose types are `T`
+#define SWAP(T, a, b) \
     do { \
-        _T __tmp = __lhs; \
-        __lhs = __rhs; \
-        __rhs = __tmp; \
+        T __tmp = a; \
+        a = b; \
+        b = __tmp; \
     } while (0)
 
 /// convert between big and little endians
@@ -98,7 +98,7 @@ double random_normal(void) {
 
 /// X = alpha*X
 /// - X: N vector
-void my_sscal(int N, float alpha, float *X) {
+void myblas_sscal(int N, float alpha, float *X) {
     for (int i = 0; i < N; ++i) {
         X[i] *= alpha;
     }
@@ -107,7 +107,7 @@ void my_sscal(int N, float alpha, float *X) {
 /// return index of max value
 /// - X: N vector
 /// **NOTE**: not provided by BLAS
-int my_ismax(int N, const float *X) {
+int myblas_ismax(int N, const float *X) {
     int ix = 0;
     for (int i = 1; i < N; ++i) {
         if (X[ix] < X[i]) {
@@ -119,7 +119,7 @@ int my_ismax(int N, const float *X) {
 
 /// Y = alpha*X + Y
 /// - X,Y: N vector
-void my_saxpy(int N, float alpha, const float *X, float *Y) {
+void myblas_saxpy(int N, float alpha, const float *X, float *Y) {
     for (int i = 0; i < N; ++i) {
         Y[i] = fma(alpha, X[i], Y[i]);
     }
@@ -127,7 +127,7 @@ void my_saxpy(int N, float alpha, const float *X, float *Y) {
 
 /// dot product
 /// - X,Y: N vector
-float my_sdot(int N, const float *X, const float *Y) {
+float myblas_sdot(int N, const float *X, const float *Y) {
     float sum = 0;
     for (int i = 0; i < N; ++i) {
         sum = fmaf(X[i], Y[i], sum);
@@ -139,10 +139,10 @@ float my_sdot(int N, const float *X, const float *Y) {
 /// - A: M*N matrix
 /// - X: N vector
 /// - Y: M vector
-void my_sgemv(int M, int N, float alpha, const float *A, const float *X, float beta, float *Y) {
-    my_sscal(M, beta, Y);
+void myblas_sgemv(int M, int N, float alpha, const float *A, const float *X, float beta, float *Y) {
+    myblas_sscal(M, beta, Y);
     for (int m = 0; m < M; ++m) {
-        Y[m] = fmaf(alpha, my_sdot(N, A + m * N, X), Y[m]);
+        Y[m] = fmaf(alpha, myblas_sdot(N, A + m * N, X), Y[m]);
     }
 }
 
@@ -150,7 +150,7 @@ void my_sgemv(int M, int N, float alpha, const float *A, const float *X, float b
 /// - X: M vector
 /// - Y: N vector
 /// - A: M*N matrix
-void my_sger(int M, int N, float alpha, const float *X, const float *Y, float *A) {
+void myblas_sger(int M, int N, float alpha, const float *X, const float *Y, float *A) {
     for (int m = 0; m < M; ++m) {
         for (int n = 0; n < N; ++n) {
             A[m * N + n] = fmaf(alpha, X[m] * Y[n], A[m * N + n]);
@@ -188,14 +188,14 @@ typedef struct BMP_InfoHeader {
     int32_t important_colors;
 } BMP_InfoHeader;
 
-typedef struct BMP_ColorPallet {
+typedef struct BMP_ColorPalette {
     uint32_t colors[256];
     size_t size;
-} BMP_ColorPallet;
+} BMP_ColorPalette;
 
 /// supports gray-scale only
 /// **TODO**: full support
-void BMP_init(BMP_Header *header, BMP_InfoHeader *info, BMP_ColorPallet *pallet) {
+void BMP_init(BMP_Header *header, BMP_InfoHeader *info, BMP_ColorPalette *palette) {
     union {
         int8_t c[2];
         int16_t s;
@@ -216,9 +216,9 @@ void BMP_init(BMP_Header *header, BMP_InfoHeader *info, BMP_ColorPallet *pallet)
     info->colors = 0;
     info->important_colors = 0;
 
-    pallet->size = 1u << info->bit_count;
-    for (size_t i = 0; i < pallet->size; ++i) {
-        pallet->colors[i] = (i << 16) | (i << 8) | i;
+    palette->size = 1u << info->bit_count;
+    for (size_t i = 0; i < palette->size; ++i) {
+        palette->colors[i] = (i << 16) | (i << 8) | i;
     }
 }
 
@@ -254,17 +254,22 @@ static void mnist_load_label(int8_t *label, FILE *fp) {
     fread(label, sizeof(*label), 1, fp);
 }
 
+static FILE *mnist_fopen(const char *fname) {
+    FILE *fp = fopen(fname, "rb");
+    if (!fp) {
+        perror(fname);
+        exit(1);
+    }
+    return fp;
+}
+
 void mnist_init(
   float **train_x, int8_t *train_y, int *train_count, float **test_x, int8_t *test_y,
   int *test_count, int *rows, int *cols) {
-    FILE *train_image = fopen(MNIST_TRAIN_IMAGES, "rb");
-    FILE *train_label = fopen(MNIST_TRAIN_LABELS, "rb");
-    FILE *test_image = fopen(MNIST_TEST_IMAGES, "rb");
-    FILE *test_label = fopen(MNIST_TEST_LABELS, "rb");
-    if (!train_image || !train_label || !test_image || !test_label) {
-        perror("MNIST");
-        exit(1);
-    }
+    FILE *train_image = mnist_fopen(MNIST_TRAIN_IMAGES);
+    FILE *train_label = mnist_fopen(MNIST_TRAIN_LABELS);
+    FILE *test_image = mnist_fopen(MNIST_TEST_IMAGES);
+    FILE *test_label = mnist_fopen(MNIST_TEST_LABELS);
 
     fseek(train_image, 4, SEEK_SET);
     fseek(train_label, 4, SEEK_SET);
@@ -330,15 +335,15 @@ void mnist_save_bmp(int32_t width, int32_t height, const float *x, const char *f
 
     BMP_Header header;
     BMP_InfoHeader info;
-    BMP_ColorPallet pallet;
-    BMP_init(&header, &info, &pallet);
+    BMP_ColorPalette palette;
+    BMP_init(&header, &info, &palette);
 
     info.width = width;
     info.height = height;
 
     fwrite(&header, 14, 1, fp);
     fwrite(&info, 40, 1, fp);
-    fwrite(&pallet.colors, sizeof(pallet.colors[0]), pallet.size, fp);
+    fwrite(&palette.colors, sizeof(palette.colors[0]), palette.size, fp);
     for (int32_t i = height; i > 0; --i) {
         for (int32_t j = 0; j < width; ++j) {
             fwrite(&data[(i - 1) * width + j], sizeof(*data), 1, fp);
@@ -362,10 +367,10 @@ void mnist_load_bmp(float *x, const char *fname) {
 
     BMP_Header header;
     BMP_InfoHeader info;
-    BMP_ColorPallet pallet;
+    BMP_ColorPalette palette;
     fread(&header, sizeof(header), 1, fp);
     fread(&info, sizeof(info), 1, fp);
-    fread(pallet.colors, sizeof(pallet.colors[0]), 256, fp);
+    fread(palette.colors, sizeof(palette.colors[0]), 256, fp);
     if (
       info.header_size != 40 || info.bit_count != 8 || info.width != MNIST_IMAGE_COLS
       || info.height != MNIST_IMAGE_ROWS) {
@@ -647,12 +652,8 @@ static void load_param(float *dest, int len, const char *fname) {
     FILE *fp = fopen(str, "rb");
     if (!fp) {
         for (int i = 0; i < len; ++i) {
-            dest[i] =
-#ifdef STDDEV
-              STDDEV * random_normal();
-#else
-              0.04 * random_normal();
-#endif
+            dest[i] = 0.04 * random_normal();
+            // dest[i] = 0.2 * random_uniform() - 0.1;
         }
     } else {
         fread(dest, sizeof(float), len, fp);
@@ -699,7 +700,7 @@ void affine(
   int m, int n, const float *restrict x, const float *restrict W, const float *restrict b,
   float *restrict y) {
     memcpy(y, b, m * sizeof(float));
-    my_sgemv(m, n, 1, W, x, 1, y);
+    myblas_sgemv(m, n, 1, W, x, 1, y);
 }
 
 /// y_i = max(x_i, 0)
@@ -711,7 +712,7 @@ void relu(int n, const float *restrict x, float *restrict y) {
 
 /// y = exp(x .- max(x)) ./ sum(exp(x .- max(x)))
 void softmax(int n, const float *restrict x, float *restrict y) {
-    int idx = my_ismax(n, x);
+    int idx = myblas_ismax(n, x);
     double tmp = 0;
     for (int i = 0; i < n; ++i) {
         tmp += exp(x[i] - x[idx]);
@@ -750,7 +751,7 @@ void affine_bwd(
   float *restrict dW, float *restrict db, float *restrict dx) {
     // dW = dy * x^{T}
     memset(dW, 0, m * n * sizeof(float));
-    my_sger(m, n, 1, dy, x, dW);
+    myblas_sger(m, n, 1, dy, x, dW);
 
     // db = dy
     memcpy(db, dy, m * sizeof(float));
@@ -780,9 +781,6 @@ static void load_params(void) {
 
 static void save_params(void) {
     static const char *s[FC_LAYERS * 2] = {"fc0_W", "fc0_b", "fc1_W", "fc1_b", "fc2_W", "fc2_b"};
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
     for (int i = 0; i < FC_LAYERS; ++i) {
         save_param(fc_W[i], fc_W_size[i], s[i * 2]);
         save_param(fc_b[i], fc_b_size[i], s[i * 2 + 1]);
@@ -816,7 +814,7 @@ static Result minibatch_train(float **x, const int8_t *t, float eta, float alpha
         softmax(dims[5].in, z[5], z[6]);
 
         float *y = z[LAYERS];
-        int idx = my_ismax(dims[LAYERS - 1].out, y);
+        int idx = myblas_ismax(dims[LAYERS - 1].out, y);
         c += idx == t[i];
         l += cross_entropy(y, t[i]);
 
@@ -847,16 +845,16 @@ static Result minibatch_train(float **x, const int8_t *t, float eta, float alpha
         float *fc_db_s = calloc(fc_b_size[i], sizeof(float));
 
         for (int j = 0; j < BATCH_SIZE; ++j) {
-            my_saxpy(fc_W_size[i], 1, fc_dW[i][j], fc_dW_s);
-            my_saxpy(fc_b_size[i], 1, fc_db[i][j], fc_db_s);
+            myblas_saxpy(fc_W_size[i], 1, fc_dW[i][j], fc_dW_s);
+            myblas_saxpy(fc_b_size[i], 1, fc_db[i][j], fc_db_s);
         }
 
-        my_sscal(fc_W_size[i], alpha, momentum_W[i]);
-        my_saxpy(fc_W_size[i], __eta, fc_dW_s, momentum_W[i]);
-        my_saxpy(fc_W_size[i], -1, momentum_W[i], fc_W[i]);
-        my_sscal(fc_b_size[i], alpha, momentum_b[i]);
-        my_saxpy(fc_b_size[i], __eta, fc_db_s, momentum_b[i]);
-        my_saxpy(fc_b_size[i], -1, momentum_b[i], fc_b[i]);
+        myblas_sscal(fc_W_size[i], alpha, momentum_W[i]);
+        myblas_saxpy(fc_W_size[i], __eta, fc_dW_s, momentum_W[i]);
+        myblas_saxpy(fc_W_size[i], -1, momentum_W[i], fc_W[i]);
+        myblas_sscal(fc_b_size[i], alpha, momentum_b[i]);
+        myblas_saxpy(fc_b_size[i], __eta, fc_db_s, momentum_b[i]);
+        myblas_saxpy(fc_b_size[i], -1, momentum_b[i], fc_b[i]);
 
         free(fc_dW_s);
         free(fc_db_s);
@@ -882,7 +880,7 @@ static Result inference(float *x, int8_t t) {
     softmax(dims[5].in, z[5], z[6]);
 
     float *y = z[LAYERS];
-    int idx = my_ismax(dims[LAYERS - 1].out, y);
+    int idx = myblas_ismax(dims[LAYERS - 1].out, y);
     c = idx == t;
     l = cross_entropy(y, t);
 
@@ -1017,7 +1015,7 @@ int print_usage(void) {
       "Inference from each FILE when option `-i` is specified.\n"
       "Each FILE must be a 28*28 image file.\n"
       "Supported file types:\n"
-      "  * Windows Bitmap\n"
+      "  * Windows bitmap\n"
 #if USE_PNG
       "  * PNG\n"
 #endif
