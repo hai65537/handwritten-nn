@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <math.h>
 #include <memory.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,8 +19,11 @@ char *progname;
 
 // utilities {{{
 
-_Noreturn static void error(const char *str) {
-    fprintf(stderr, "%s: %s\n", progname, str);
+_Noreturn static void error(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    fprintf(stderr, "%s: ", progname);
+    vfprintf(stderr, fmt, args);
     exit(1);
 }
 
@@ -121,7 +125,7 @@ int myblas_ismax(int N, const float *X) {
 /// - X,Y: N vector
 void myblas_saxpy(int N, float alpha, const float *X, float *Y) {
     for (int i = 0; i < N; ++i) {
-        Y[i] = fma(alpha, X[i], Y[i]);
+        Y[i] = fmaf(alpha, X[i], Y[i]);
     }
 }
 
@@ -257,6 +261,7 @@ static void mnist_load_label(int8_t *label, FILE *fp) {
 static FILE *mnist_fopen(const char *fname) {
     FILE *fp = fopen(fname, "rb");
     if (!fp) {
+        fprintf("%s: ", progname);
         perror(fname);
         exit(1);
     }
@@ -324,7 +329,8 @@ void mnist_init(
 void mnist_save_bmp(int32_t width, int32_t height, const float *x, const char *fname) {
     FILE *fp = fopen(fname, "wb");
     if (!fp) {
-        perror("MNIST");
+        fprintf("%s: ", progname);
+        perror(fname);
         exit(1);
     }
 
@@ -361,7 +367,8 @@ void mnist_save_bmp(int32_t width, int32_t height, const float *x, const char *f
 void mnist_load_bmp(float *x, const char *fname) {
     FILE *fp = fopen(fname, "rb");
     if (!fp) {
-        perror("MNIST");
+        fprintf("%s: ", progname);
+        perror(fname);
         exit(1);
     }
 
@@ -371,9 +378,13 @@ void mnist_load_bmp(float *x, const char *fname) {
     fread(&header, sizeof(header), 1, fp);
     fread(&info, sizeof(info), 1, fp);
     fread(palette.colors, sizeof(palette.colors[0]), 256, fp);
+    union {
+        int8_t c[2];
+        int16_t s;
+    } u = {.s = header.magic};
     if (
-      info.header_size != 40 || info.bit_count != 8 || info.width != MNIST_IMAGE_COLS
-      || info.height != MNIST_IMAGE_ROWS) {
+      u.c[0] != 'B' || u.c[1] != 'M' || info.header_size != 40 || info.bit_count != 8
+      || info.width != MNIST_IMAGE_COLS || info.height != MNIST_IMAGE_ROWS) {
         error("Unsupported file type");
     }
 
@@ -395,7 +406,8 @@ void mnist_load_bmp(float *x, const char *fname) {
 void mnist_save_png(int width, int height, float *x, const char *fname) {
     FILE *fp = fopen(fname, "wb");
     if (!fp) {
-        perror("MNIST");
+        fprintf("%s: ", progname);
+        perror(fname);
         exit(1);
     }
 
@@ -437,7 +449,8 @@ void mnist_save_png(int width, int height, float *x, const char *fname) {
 void mnist_load_png(float *x, const char *fname) {
     FILE *fp = fopen(fname, "rb");
     if (!fp) {
-        perror("MNIST");
+        fprintf("%s: ", progname);
+        perror(fname);
         exit(1);
     }
 
@@ -457,13 +470,15 @@ void mnist_load_png(float *x, const char *fname) {
 
     png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png) {
-        perror("MNIST");
+        fprintf("%s: ", progname);
+        perror(fname);
         exit(1);
     }
 
     info = png_create_info_struct(png);
     if (!png) {
-        perror("MNIST");
+        fprintf("%s: ", progname);
+        perror(fname);
         exit(1);
     }
 
@@ -564,6 +579,87 @@ void mnist_save_images(void) {
 
 // }}} mnist
 
+// network {{{
+
+/// y = W*x + b
+/// - x: n vector
+/// - W: m*n matrix
+/// - b: m vector
+void affine(
+  int m, int n, const float *restrict x, const float *restrict W, const float *restrict b,
+  float *restrict y) {
+    memcpy(y, b, m * sizeof(float));
+    myblas_sgemv(m, n, 1, W, x, 1, y);
+}
+
+/// dW = dy * x^{T}
+/// db = dy
+/// dx = W^{T} * dy
+/// - x:  n vector
+/// - W:  m*n matrix
+/// - dy: m vector
+/// - dW: m*n matrix
+/// - db: m vector
+/// - dx: n vector
+void affine_bwd(
+  int m, int n, const float *restrict x, const float *restrict W, const float *restrict dy,
+  float *restrict dW, float *restrict db, float *restrict dx) {
+    // dW = dy * x^{T}
+    memset(dW, 0, m * n * sizeof(float));
+    myblas_sger(m, n, 1, dy, x, dW);
+
+    // db = dy
+    memcpy(db, dy, m * sizeof(float));
+
+    // dx = W^{T} * dy
+    memset(dx, 0, n * sizeof(float));
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < m; ++j) {
+            dx[i] = fmaf(W[j * n + i], dy[j], dx[i]);
+        }
+    }
+}
+
+/// y_i = max(x_i, 0)
+void relu(int n, const float *restrict x, float *restrict y) {
+    for (int i = 0; i < n; ++i) {
+        y[i] = x[i] > 0 ? x[i] : 0;
+    }
+}
+
+void relu_bwd(int n, const float *restrict x, const float *restrict dy, float *restrict dx) {
+    for (int i = 0; i < n; ++i) {
+        dx[i] = x[i] > 0 ? dy[i] : 0;
+    }
+}
+
+/// y = exp(x .- max(x)) ./ sum(exp(x .- max(x)))
+void softmax(int n, const float *restrict x, float *restrict y) {
+    int idx = myblas_ismax(n, x);
+    double tmp = 0;
+    for (int i = 0; i < n; ++i) {
+        tmp += exp(x[i] - x[idx]);
+    }
+    for (int i = 0; i < n; ++i) {
+        y[i] = exp(x[i] - x[idx]) / tmp;
+    }
+}
+
+/// dx = y - t
+/// - y: n vector
+/// - t: n one-hot vector
+void softmax_with_loss_bwd(int n, const float *restrict y, int8_t t, float *restrict dx) {
+    for (int i = 0; i < n; ++i) {
+        dx[i] = y[i] - (t == i ? 1 : 0);
+    }
+}
+
+static inline double cross_entropy(const float *y, int8_t t) {
+    return -log(y[t] + 1e-7);
+}
+
+// }}} network
+
 #define PARAMS_DIR DATA_DIR "params/"
 
 #define FC_LAYERS 3
@@ -652,7 +748,7 @@ static void load_param(float *dest, int len, const char *fname) {
     FILE *fp = fopen(str, "rb");
     if (!fp) {
         for (int i = 0; i < len; ++i) {
-            dest[i] = 0.04 * random_normal();
+            dest[i] = 0.05 * random_normal();
             // dest[i] = 0.2 * random_uniform() - 0.1;
         }
     } else {
@@ -675,7 +771,8 @@ static void save_param(const float *src, int len, const char *fname) {
     snprintf(str, sizeof(str), PARAMS_DIR "%s", fname);
     FILE *fp = fopen(str, "wb");
     if (!fp) {
-        perror(progname);
+        fprintf("%s: ", progname);
+        perror(str);
         exit(1);
     }
     fwrite(src, sizeof(float), len, fp);
@@ -689,87 +786,6 @@ void random_shuffle(int n, float **x, int8_t *y) {
         SWAP(int8_t, y[i], y[idx]);
     }
 }
-
-// network {{{
-
-/// y = W*x + b
-/// - x: n vector
-/// - W: m*n matrix
-/// - b: m vector
-void affine(
-  int m, int n, const float *restrict x, const float *restrict W, const float *restrict b,
-  float *restrict y) {
-    memcpy(y, b, m * sizeof(float));
-    myblas_sgemv(m, n, 1, W, x, 1, y);
-}
-
-/// y_i = max(x_i, 0)
-void relu(int n, const float *restrict x, float *restrict y) {
-    for (int i = 0; i < n; ++i) {
-        y[i] = x[i] > 0 ? x[i] : 0;
-    }
-}
-
-/// y = exp(x .- max(x)) ./ sum(exp(x .- max(x)))
-void softmax(int n, const float *restrict x, float *restrict y) {
-    int idx = myblas_ismax(n, x);
-    double tmp = 0;
-    for (int i = 0; i < n; ++i) {
-        tmp += exp(x[i] - x[idx]);
-    }
-    for (int i = 0; i < n; ++i) {
-        y[i] = exp(x[i] - x[idx]) / tmp;
-    }
-}
-
-/// dx = y - t
-/// - y: n vector
-/// - t: n one-hot vector
-void softmax_with_loss_bwd(int n, const float *restrict y, int8_t t, float *restrict dx) {
-    for (int i = 0; i < n; ++i) {
-        dx[i] = y[i] - (t == i ? 1 : 0);
-    }
-}
-
-void relu_bwd(int n, const float *restrict x, const float *restrict dy, float *restrict dx) {
-    for (int i = 0; i < n; ++i) {
-        dx[i] = x[i] > 0 ? dy[i] : 0;
-    }
-}
-
-/// dW = dy * x^{T}
-/// db = dy
-/// dx = W^{T} * dy
-/// - x:  n vector
-/// - W:  m*n matrix
-/// - dy: m vector
-/// - dW: m*n matrix
-/// - db: m vector
-/// - dx: n vector
-void affine_bwd(
-  int m, int n, const float *restrict x, const float *restrict W, const float *restrict dy,
-  float *restrict dW, float *restrict db, float *restrict dx) {
-    // dW = dy * x^{T}
-    memset(dW, 0, m * n * sizeof(float));
-    myblas_sger(m, n, 1, dy, x, dW);
-
-    // db = dy
-    memcpy(db, dy, m * sizeof(float));
-
-    // dx = W^{T} * dy
-    memset(dx, 0, n * sizeof(float));
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < m; ++j) {
-            dx[i] = fmaf(W[j * n + i], dy[j], dx[i]);
-        }
-    }
-}
-
-static inline double cross_entropy(float *y, int8_t t) {
-    return -log(y[t] + 1e-7);
-}
-
-// }}} network
 
 static void load_params(void) {
     static const char *s[FC_LAYERS * 2] = {"fc0_W", "fc0_b", "fc1_W", "fc1_b", "fc2_W", "fc2_b"};
@@ -972,8 +988,7 @@ void inference_from_file(char *fname) {
     }
 
     if (!ext) {
-        fprintf(stderr, "%s: %s: Unsupported file type\n", progname, fname);
-        exit(1);
+        error("%s: Unsupported file type\n", fname);
     } else if (!strcmp(ext, ".bmp")) {
         type = BMP;
 #if USE_PNG
@@ -981,8 +996,7 @@ void inference_from_file(char *fname) {
         type = PNG;
 #endif
     } else {
-        fprintf(stderr, "%s: %s: Unsupported file type\n", progname, fname);
-        exit(1);
+        error("%s: Unsupported file type\n", fname);
     }
 
     float *x = calloc(MNIST_IMAGE_SIZE, sizeof(float));

@@ -1,7 +1,7 @@
 CC:=clang
 CFLAGS:=-Wall -Wextra -pedantic
 CFLAGS+=-march=native -O3 -DNDEBUG -fopenmp
-CFLAGS+=-pipe -flto
+CFLAGS+=-pipe #-flto
 # CFLAGS+=-DUSE_PNG=1
 TARGET:=nn
 SRCS:=main.c
