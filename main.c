@@ -261,7 +261,7 @@ static void mnist_load_label(int8_t *label, FILE *fp) {
 static FILE *mnist_fopen(const char *fname) {
     FILE *fp = fopen(fname, "rb");
     if (!fp) {
-        fprintf("%s: ", progname);
+        fprintf(stderr, "%s: ", progname);
         perror(fname);
         exit(1);
     }
@@ -329,7 +329,7 @@ void mnist_init(
 void mnist_save_bmp(int32_t width, int32_t height, const float *x, const char *fname) {
     FILE *fp = fopen(fname, "wb");
     if (!fp) {
-        fprintf("%s: ", progname);
+        fprintf(stderr, "%s: ", progname);
         perror(fname);
         exit(1);
     }
@@ -367,7 +367,7 @@ void mnist_save_bmp(int32_t width, int32_t height, const float *x, const char *f
 void mnist_load_bmp(float *x, const char *fname) {
     FILE *fp = fopen(fname, "rb");
     if (!fp) {
-        fprintf("%s: ", progname);
+        fprintf(stderr, "%s: ", progname);
         perror(fname);
         exit(1);
     }
@@ -406,7 +406,7 @@ void mnist_load_bmp(float *x, const char *fname) {
 void mnist_save_png(int width, int height, float *x, const char *fname) {
     FILE *fp = fopen(fname, "wb");
     if (!fp) {
-        fprintf("%s: ", progname);
+        fprintf(stderr, "%s: ", progname);
         perror(fname);
         exit(1);
     }
@@ -449,7 +449,7 @@ void mnist_save_png(int width, int height, float *x, const char *fname) {
 void mnist_load_png(float *x, const char *fname) {
     FILE *fp = fopen(fname, "rb");
     if (!fp) {
-        fprintf("%s: ", progname);
+        fprintf(stderr, "%s: ", progname);
         perror(fname);
         exit(1);
     }
@@ -470,14 +470,14 @@ void mnist_load_png(float *x, const char *fname) {
 
     png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png) {
-        fprintf("%s: ", progname);
+        fprintf(stderr, "%s: ", progname);
         perror(fname);
         exit(1);
     }
 
     info = png_create_info_struct(png);
     if (!png) {
-        fprintf("%s: ", progname);
+        fprintf(stderr, "%s: ", progname);
         perror(fname);
         exit(1);
     }
@@ -771,7 +771,7 @@ static void save_param(const float *src, int len, const char *fname) {
     snprintf(str, sizeof(str), PARAMS_DIR "%s", fname);
     FILE *fp = fopen(str, "wb");
     if (!fp) {
-        fprintf("%s: ", progname);
+        fprintf(stderr, "%s: ", progname);
         perror(str);
         exit(1);
     }
@@ -1054,7 +1054,7 @@ int main(int argc, char **argv) {
     float eta = 0.01;
     float decay = 1e-6;
     float alpha = 0.9;
-    int seed = 1;
+    unsigned seed = 1;
     Mode mode = kTrain;
     progname = argv[0];
 
@@ -1071,7 +1071,7 @@ int main(int argc, char **argv) {
             alpha = strtof(optarg, NULL);
             break;
         case 'n':
-            epochs = strtol(optarg, NULL, 10);
+            epochs = atoi(optarg);
             break;
         case 'p':
             mode = kSavePictures;
@@ -1080,7 +1080,7 @@ int main(int argc, char **argv) {
             eta = strtof(optarg, NULL);
             break;
         case 's':
-            seed = atoi(optarg);
+            seed = strtoul(optarg, NULL, 10);
             break;
         case 't':
             mode = kTrain;
