@@ -930,7 +930,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
 
     load_params();
 
-    printf("epochs,train_acc,train_loss,test_acc,test_loss\n");
+    printf("epoch,train_acc,train_loss,test_acc,test_loss\n");
     for (int e = 0; e < epochs; ++e) {
         int c = 0;
         double l = 0;
@@ -941,7 +941,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
             c += r.count;
             l += r.loss;
         }
-        printf("%d,%f,%e", e + 1, c / (double)MNIST_TRAIN_COUNT, l / MNIST_TRAIN_COUNT);
+        printf("%d,%.4f,%.4f", e + 1, c / (double)MNIST_TRAIN_COUNT, l / MNIST_TRAIN_COUNT);
 
         c = 0;
         l = 0;
@@ -953,7 +953,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
             c += r.count;
             l += r.loss;
         }
-        printf(",%f,%e\n", c / (double)MNIST_TEST_COUNT, l / MNIST_TEST_COUNT);
+        printf(",%.4f,%.4f\n", c / (double)MNIST_TEST_COUNT, l / MNIST_TEST_COUNT);
     }
 
     save_params();
