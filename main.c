@@ -8,6 +8,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if USE_BLAS
+#include <cblas.h>
+#endif
 #if USE_PNG
 #include <png.h>
 #endif
@@ -103,9 +106,13 @@ double random_normal(void) {
 /// X = alpha*X
 /// - X: N vector
 void myblas_sscal(int N, float alpha, float *X) {
+#if USE_BALS
+    cblas_sscal(N, alpha, X, 1);
+#else
     for (int i = 0; i < N; ++i) {
         X[i] *= alpha;
     }
+#endif
 }
 
 /// return index of max value
@@ -124,19 +131,27 @@ int myblas_ismax(int N, const float *X) {
 /// Y = alpha*X + Y
 /// - X,Y: N vector
 void myblas_saxpy(int N, float alpha, const float *X, float *Y) {
+#if USE_BLAS
+    cblas_saxpy(N, alpha, X, 1, Y, 1);
+#else
     for (int i = 0; i < N; ++i) {
         Y[i] = fmaf(alpha, X[i], Y[i]);
     }
+#endif
 }
 
 /// dot product
 /// - X,Y: N vector
 float myblas_sdot(int N, const float *X, const float *Y) {
+#if USE_BLAS
+    return cblas_sdot(N, X, 1, Y, 1);
+#else
     float sum = 0;
     for (int i = 0; i < N; ++i) {
         sum = fmaf(X[i], Y[i], sum);
     }
     return sum;
+#endif
 }
 
 /// Y = alpha*A*X + beta*Y;
@@ -144,10 +159,14 @@ float myblas_sdot(int N, const float *X, const float *Y) {
 /// - X: N vector
 /// - Y: M vector
 void myblas_sgemv(int M, int N, float alpha, const float *A, const float *X, float beta, float *Y) {
+#if USE_BLAS
+    cblas_sgemv(CblasRowMajor, CblasNoTrans, M, N, alpha, A, N, X, 1, beta, Y, 1);
+#else
     myblas_sscal(M, beta, Y);
     for (int m = 0; m < M; ++m) {
-        Y[m] = fmaf(alpha, myblas_sdot(N, A + m * N, X), Y[m]);
+        Y[m] = fmaf(alpha, myblas_sdot(N, &A[m * N], X), Y[m]);
     }
+#endif
 }
 
 /// A = alpha*X*Y^t + A
@@ -155,11 +174,15 @@ void myblas_sgemv(int M, int N, float alpha, const float *A, const float *X, flo
 /// - Y: N vector
 /// - A: M*N matrix
 void myblas_sger(int M, int N, float alpha, const float *X, const float *Y, float *A) {
+#if USE_BLAS
+    cblas_sger(CblasRowMajor, M, N, alpha, X, 1, Y, 1, A, N);
+#else
     for (int m = 0; m < M; ++m) {
         for (int n = 0; n < N; ++n) {
             A[m * N + n] = fmaf(alpha, X[m] * Y[n], A[m * N + n]);
         }
     }
+#endif
 }
 
 // }}} blas
@@ -385,7 +408,7 @@ void mnist_load_bmp(float *x, const char *fname) {
     if (
       u.c[0] != 'B' || u.c[1] != 'M' || info.header_size != 40 || info.bit_count != 8
       || info.width != MNIST_IMAGE_COLS || info.height != MNIST_IMAGE_ROWS) {
-        error("Unsupported file type");
+        error("%s: Unsupported file type", fname);
     }
 
     uint8_t tmp;
@@ -465,7 +488,7 @@ void mnist_load_png(float *x, const char *fname) {
     fread(header, sizeof(header[0]), 8, fp);
 
     if (png_sig_cmp(header, 0, 8)) {
-        error("Unsupported file type");
+        error("%s: Unsupported file type", fname);
     }
 
     png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -491,7 +514,7 @@ void mnist_load_png(float *x, const char *fname) {
     datap = png_get_rows(png, info);
     type = png_get_color_type(png, info);
     if (type != PNG_COLOR_TYPE_GRAY) {
-        error("Unsupported file type");
+        error("%s: Unsupported file type", fname);
     }
 
     uint8_t *data = malloc(width * height * sizeof(*data));
@@ -612,12 +635,16 @@ void affine_bwd(
     memcpy(db, dy, m * sizeof(float));
 
     // dx = W^{T} * dy
+#if USE_BLAS
+    cblas_sgemv(CblasRowMajor, CblasTrans, m, n, 1, W, n, dy, 1, 0, dx, 1);
+#else
     memset(dx, 0, n * sizeof(float));
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < m; ++j) {
+    for (int j = 0; j < m; ++j) {
+        for (int i = 0; i < n; ++i) {
             dx[i] = fmaf(W[j * n + i], dy[j], dx[i]);
         }
     }
+#endif
 }
 
 /// y_i = max(x_i, 0)
@@ -662,8 +689,7 @@ static inline double cross_entropy(const float *y, int8_t t) {
 
 #define PARAMS_DIR DATA_DIR "params/"
 
-#define FC_LAYERS 3
-#define LAYERS (2 * FC_LAYERS)
+#define LAYERS 3
 #define FC0_ROWS 50
 #define FC0_COLS MNIST_IMAGE_SIZE
 #define FC0_SIZE (FC0_ROWS * FC0_COLS)
@@ -689,55 +715,60 @@ typedef enum FileType {
 #endif
 } FileType;
 
-static float *fc_W[FC_LAYERS];
-static float *fc_b[FC_LAYERS];
-static float *fc_dW[FC_LAYERS][BATCH_SIZE];
-static float *fc_db[FC_LAYERS][BATCH_SIZE];
-static float *momentum_W[FC_LAYERS];
-static float *momentum_b[FC_LAYERS];
-static const int fc_W_size[FC_LAYERS] = {FC0_SIZE, FC1_SIZE, FC2_SIZE};
-static const int fc_b_size[FC_LAYERS] = {FC0_ROWS, FC1_ROWS, FC2_ROWS};
+static struct FC_Param {
+    float *W;
+    float *b;
+    float *dW[BATCH_SIZE];
+    float *db[BATCH_SIZE];
+    float *moment_W;
+    float *moment_b;
+} fc[LAYERS];
+static const int fc_W_size[LAYERS] = {FC0_SIZE, FC1_SIZE, FC2_SIZE};
+static const int fc_b_size[LAYERS] = {FC0_ROWS, FC1_ROWS, FC2_ROWS};
 static struct NetworkDim {
     int in;
     int out;
-} const dims[LAYERS] = {{FC0_COLS, FC0_ROWS}, {FC0_ROWS, FC0_ROWS}, {FC1_COLS, FC1_ROWS},
-                        {FC1_ROWS, FC1_ROWS}, {FC2_COLS, FC2_ROWS}, {FC2_ROWS, FC2_ROWS}};
+} const dims[2 * LAYERS] = {{FC0_COLS, FC0_ROWS}, {FC0_ROWS, FC0_ROWS}, {FC1_COLS, FC1_ROWS},
+                            {FC1_ROWS, FC1_ROWS}, {FC2_COLS, FC2_ROWS}, {FC2_ROWS, FC2_ROWS}};
 
 static void initialize(Mode mode) {
     if (mode == kSavePictures) {
         return;
     }
-    for (int i = 0; i < FC_LAYERS; ++i) {
-        fc_W[i] = malloc(fc_W_size[i] * sizeof(float));
-        fc_b[i] = malloc(fc_b_size[i] * sizeof(float));
+    for (int i = 0; i < LAYERS; ++i) {
+        fc[i].W = malloc(fc_W_size[i] * sizeof(float));
+        fc[i].b = malloc(fc_b_size[i] * sizeof(float));
         if (mode == kTrain) {
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
             for (int j = 0; j < BATCH_SIZE; ++j) {
-                fc_dW[i][j] = malloc(fc_W_size[i] * sizeof(float));
-                fc_db[i][j] = malloc(fc_b_size[i] * sizeof(float));
+                fc[i].dW[j] = malloc(fc_W_size[i] * sizeof(float));
+                fc[i].db[j] = malloc(fc_b_size[i] * sizeof(float));
             }
-            momentum_W[i] = calloc(fc_W_size[i], sizeof(float));
-            momentum_b[i] = calloc(fc_b_size[i], sizeof(float));
+            fc[i].moment_W = calloc(fc_W_size[i], sizeof(float));
+            fc[i].moment_b = calloc(fc_b_size[i], sizeof(float));
         }
     }
 }
 
 static void finalize(Mode mode) {
-    for (int i = 0; i < FC_LAYERS; ++i) {
-        free(fc_W[i]);
-        free(fc_b[i]);
+    if (mode == kSavePictures) {
+        return;
+    }
+    for (int i = 0; i < LAYERS; ++i) {
+        free(fc[i].W);
+        free(fc[i].b);
         if (mode == kTrain) {
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
             for (int j = 0; j < BATCH_SIZE; ++j) {
-                free(fc_dW[i][j]);
-                free(fc_db[i][j]);
+                free(fc[i].dW[j]);
+                free(fc[i].db[j]);
             }
-            free(momentum_W[i]);
-            free(momentum_b[i]);
+            free(fc[i].moment_W);
+            free(fc[i].moment_b);
         }
     }
 }
@@ -788,18 +819,18 @@ void random_shuffle(int n, float **x, int8_t *y) {
 }
 
 static void load_params(void) {
-    static const char *s[FC_LAYERS * 2] = {"fc0_W", "fc0_b", "fc1_W", "fc1_b", "fc2_W", "fc2_b"};
-    for (int i = 0; i < FC_LAYERS; ++i) {
-        load_param(fc_W[i], fc_W_size[i], s[i * 2]);
-        load_param(fc_b[i], fc_b_size[i], s[i * 2 + 1]);
+    static const char *s[LAYERS * 2] = {"fc0_W", "fc0_b", "fc1_W", "fc1_b", "fc2_W", "fc2_b"};
+    for (int i = 0; i < LAYERS; ++i) {
+        load_param(fc[i].W, fc_W_size[i], s[i * 2]);
+        load_param(fc[i].b, fc_b_size[i], s[i * 2 + 1]);
     }
 }
 
 static void save_params(void) {
-    static const char *s[FC_LAYERS * 2] = {"fc0_W", "fc0_b", "fc1_W", "fc1_b", "fc2_W", "fc2_b"};
-    for (int i = 0; i < FC_LAYERS; ++i) {
-        save_param(fc_W[i], fc_W_size[i], s[i * 2]);
-        save_param(fc_b[i], fc_b_size[i], s[i * 2 + 1]);
+    static const char *s[LAYERS * 2] = {"fc0_W", "fc0_b", "fc1_W", "fc1_b", "fc2_W", "fc2_b"};
+    for (int i = 0; i < LAYERS; ++i) {
+        save_param(fc[i].W, fc_W_size[i], s[i * 2]);
+        save_param(fc[i].b, fc_b_size[i], s[i * 2 + 1]);
     }
 }
 
@@ -816,37 +847,37 @@ static Result minibatch_train(float **x, const int8_t *t, float eta, float alpha
 #pragma omp parallel for reduction(+ : c, l)
 #endif
     for (int i = 0; i < BATCH_SIZE; ++i) {
-        float *z[LAYERS + 1];
+        float *z[2 * LAYERS + 1];
         z[0] = x[i];
-        for (int j = 0; j < LAYERS; ++j) {
+        for (int j = 0; j < 2 * LAYERS; ++j) {
             z[j + 1] = malloc(dims[j].out * sizeof(float));
         }
 
-        affine(dims[0].out, dims[0].in, z[0], fc_W[0], fc_b[0], z[1]);
+        affine(dims[0].out, dims[0].in, z[0], fc[0].W, fc[0].b, z[1]);
         relu(dims[1].in, z[1], z[2]);
-        affine(dims[2].out, dims[2].in, z[2], fc_W[1], fc_b[1], z[3]);
+        affine(dims[2].out, dims[2].in, z[2], fc[1].W, fc[1].b, z[3]);
         relu(dims[3].in, z[3], z[4]);
-        affine(dims[4].out, dims[4].in, z[4], fc_W[2], fc_b[2], z[5]);
+        affine(dims[4].out, dims[4].in, z[4], fc[2].W, fc[2].b, z[5]);
         softmax(dims[5].in, z[5], z[6]);
 
-        float *y = z[LAYERS];
-        int idx = myblas_ismax(dims[LAYERS - 1].out, y);
+        float *y = z[2 * LAYERS];
+        int idx = myblas_ismax(dims[2 * LAYERS - 1].out, y);
         c += idx == t[i];
         l += cross_entropy(y, t[i]);
 
-        float *dx[LAYERS];
-        for (int j = 0; j < LAYERS; ++j) {
+        float *dx[2 * LAYERS];
+        for (int j = 0; j < 2 * LAYERS; ++j) {
             dx[j] = malloc(dims[j].in * sizeof(float));
         }
 
         softmax_with_loss_bwd(dims[5].in, z[6], t[i], dx[5]);
-        affine_bwd(dims[4].out, dims[4].in, z[4], fc_W[2], dx[5], fc_dW[2][i], fc_db[2][i], dx[4]);
+        affine_bwd(dims[4].out, dims[4].in, z[4], fc[2].W, dx[5], fc[2].dW[i], fc[2].db[i], dx[4]);
         relu_bwd(dims[3].in, z[3], dx[4], dx[3]);
-        affine_bwd(dims[2].out, dims[2].in, z[2], fc_W[1], dx[3], fc_dW[1][i], fc_db[1][i], dx[2]);
+        affine_bwd(dims[2].out, dims[2].in, z[2], fc[1].W, dx[3], fc[1].dW[i], fc[1].db[i], dx[2]);
         relu_bwd(dims[1].in, z[1], dx[2], dx[1]);
-        affine_bwd(dims[0].out, dims[0].in, z[0], fc_W[0], dx[1], fc_dW[0][i], fc_db[0][i], dx[0]);
+        affine_bwd(dims[0].out, dims[0].in, z[0], fc[0].W, dx[1], fc[0].dW[i], fc[0].db[i], dx[0]);
 
-        for (int j = 0; j < LAYERS; ++j) {
+        for (int j = 0; j < 2 * LAYERS; ++j) {
             free(z[j + 1]);
             free(dx[j]);
         }
@@ -856,21 +887,21 @@ static Result minibatch_train(float **x, const int8_t *t, float eta, float alpha
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-    for (int i = 0; i < FC_LAYERS; ++i) {
+    for (int i = 0; i < LAYERS; ++i) {
         float *fc_dW_s = calloc(fc_W_size[i], sizeof(float));
         float *fc_db_s = calloc(fc_b_size[i], sizeof(float));
 
         for (int j = 0; j < BATCH_SIZE; ++j) {
-            myblas_saxpy(fc_W_size[i], 1, fc_dW[i][j], fc_dW_s);
-            myblas_saxpy(fc_b_size[i], 1, fc_db[i][j], fc_db_s);
+            myblas_saxpy(fc_W_size[i], 1, fc[i].dW[j], fc_dW_s);
+            myblas_saxpy(fc_b_size[i], 1, fc[i].db[j], fc_db_s);
         }
 
-        myblas_sscal(fc_W_size[i], alpha, momentum_W[i]);
-        myblas_saxpy(fc_W_size[i], __eta, fc_dW_s, momentum_W[i]);
-        myblas_saxpy(fc_W_size[i], -1, momentum_W[i], fc_W[i]);
-        myblas_sscal(fc_b_size[i], alpha, momentum_b[i]);
-        myblas_saxpy(fc_b_size[i], __eta, fc_db_s, momentum_b[i]);
-        myblas_saxpy(fc_b_size[i], -1, momentum_b[i], fc_b[i]);
+        myblas_sscal(fc_W_size[i], alpha, fc[i].moment_W);
+        myblas_saxpy(fc_W_size[i], __eta, fc_dW_s, fc[i].moment_W);
+        myblas_saxpy(fc_W_size[i], -1, fc[i].moment_W, fc[i].W);
+        myblas_sscal(fc_b_size[i], alpha, fc[i].moment_b);
+        myblas_saxpy(fc_b_size[i], __eta, fc_db_s, fc[i].moment_b);
+        myblas_saxpy(fc_b_size[i], -1, fc[i].moment_b, fc[i].b);
 
         free(fc_dW_s);
         free(fc_db_s);
@@ -882,25 +913,25 @@ static Result minibatch_train(float **x, const int8_t *t, float eta, float alpha
 static Result inference(float *x, int8_t t) {
     int c;
     double l;
-    float *z[FC_LAYERS * 2 + 1];
+    float *z[LAYERS * 2 + 1];
     z[0] = x;
-    for (int j = 0; j < LAYERS; ++j) {
+    for (int j = 0; j < 2 * LAYERS; ++j) {
         z[j + 1] = malloc(dims[j].out * sizeof(float));
     }
 
-    affine(dims[0].out, dims[0].in, z[0], fc_W[0], fc_b[0], z[1]);
+    affine(dims[0].out, dims[0].in, z[0], fc[0].W, fc[0].b, z[1]);
     relu(dims[1].in, z[1], z[2]);
-    affine(dims[2].out, dims[2].in, z[2], fc_W[1], fc_b[1], z[3]);
+    affine(dims[2].out, dims[2].in, z[2], fc[1].W, fc[1].b, z[3]);
     relu(dims[3].in, z[3], z[4]);
-    affine(dims[4].out, dims[4].in, z[4], fc_W[2], fc_b[2], z[5]);
+    affine(dims[4].out, dims[4].in, z[4], fc[2].W, fc[2].b, z[5]);
     softmax(dims[5].in, z[5], z[6]);
 
-    float *y = z[LAYERS];
-    int idx = myblas_ismax(dims[LAYERS - 1].out, y);
+    float *y = z[2 * LAYERS];
+    int idx = myblas_ismax(dims[2 * LAYERS - 1].out, y);
     c = idx == t;
     l = cross_entropy(y, t);
 
-    for (int i = 1; i < LAYERS + 1; ++i) {
+    for (int i = 1; i < 2 * LAYERS + 1; ++i) {
         free(z[i]);
     }
 

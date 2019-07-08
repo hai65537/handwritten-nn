@@ -1,11 +1,13 @@
 CC:=clang
 CFLAGS:=-Wall -Wextra -pedantic
-CFLAGS+=-march=native -O3 -DNDEBUG -fopenmp
+CFLAGS+=-march=native -O3 -DNDEBUG -fopenmp 
 CFLAGS+=-pipe #-flto
+# CFLAGS+=-DUSE_BLAS
 # CFLAGS+=-DUSE_PNG=1
 TARGET:=nn
 SRCS:=main.c
 LIBS:=-lm
+# LIBS+=-lcblas
 # LIBS+=-lpng
 
 $(TARGET): $(SRCS)
