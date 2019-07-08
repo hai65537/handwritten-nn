@@ -63,7 +63,7 @@ static uint32_t XS128(w) = 88675123;
 
 void xorshift128_seed(unsigned s) {
     if (s != 0) {
-        XS128(w) += s - 1;
+        XS128(w) = (88675123 - 1) + s;
     }
 }
 
@@ -941,7 +941,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
             c += r.count;
             l += r.loss;
         }
-        printf("%d,%.4f,%.4f", e + 1, c / (double)MNIST_TRAIN_COUNT, l / MNIST_TRAIN_COUNT);
+        printf("%d,%f,%e", e + 1, c / (double)MNIST_TRAIN_COUNT, l / MNIST_TRAIN_COUNT);
 
         c = 0;
         l = 0;
@@ -953,7 +953,7 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
             c += r.count;
             l += r.loss;
         }
-        printf(",%.4f,%.4f\n", c / (double)MNIST_TEST_COUNT, l / MNIST_TEST_COUNT);
+        printf(",%f,%e\n", c / (double)MNIST_TEST_COUNT, l / MNIST_TEST_COUNT);
     }
 
     save_params();
