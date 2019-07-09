@@ -800,7 +800,7 @@ static void load_param(float *dest, int len, const char *fname) {
     if (!fp) {
         for (int i = 0; i < len; ++i) {
             dest[i] = 0.05 * random_normal();
-            // dest[i] = 0.2 * random_uniform() - 0.1;
+            // dest[i] = (random_uniform() - 0.5) * 0.2;
         }
     } else {
         fread(dest, sizeof(float), len, fp);
@@ -1114,11 +1114,13 @@ static int print_usage(void) {
 #if USE_PNG
       "  * PNG\n"
 #endif
-      "\nModes:\n"
+      "\n"
+      "Modes:\n"
       "  -i         inference from FILE;\n"
       "  -p         convert datasets to pictures\n"
       "  -t         train (this is default)\n"
-      "\nParameters:\n"
+      "\n"
+      "Parameters:\n"
       "  -d NUMBER  decay for learning rate (default: 1e-6)\n"
       "  -m NUMBER  momentum (default: 0.9)\n"
       "  -n NUMBER  number of epochs (default: 10)\n"
