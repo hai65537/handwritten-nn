@@ -838,19 +838,20 @@ static void random_shuffle(int n, float **x, int8_t *y) {
     }
 }
 
+static const char *__params_fname[LAYERS * 2]
+  = {"fc0_W", "fc0_b", "fc1_W", "fc1_b", "fc2_W", "fc2_b"};
+
 static void load_params(void) {
-    static const char *s[LAYERS * 2] = {"fc0_W", "fc0_b", "fc1_W", "fc1_b", "fc2_W", "fc2_b"};
     for (int i = 0; i < LAYERS; ++i) {
-        load_param(fc[i].W, fc_W_size[i], s[i * 2]);
-        load_param(fc[i].b, fc_b_size[i], s[i * 2 + 1]);
+        load_param(fc[i].W, fc_W_size[i], __params_fname[i * 2]);
+        load_param(fc[i].b, fc_b_size[i], __params_fname[i * 2 + 1]);
     }
 }
 
 static void save_params(void) {
-    static const char *s[LAYERS * 2] = {"fc0_W", "fc0_b", "fc1_W", "fc1_b", "fc2_W", "fc2_b"};
     for (int i = 0; i < LAYERS; ++i) {
-        save_param(fc[i].W, fc_W_size[i], s[i * 2]);
-        save_param(fc[i].b, fc_b_size[i], s[i * 2 + 1]);
+        save_param(fc[i].W, fc_W_size[i], __params_fname[i * 2]);
+        save_param(fc[i].b, fc_b_size[i], __params_fname[i * 2 + 1]);
     }
 }
 
