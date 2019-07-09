@@ -18,7 +18,8 @@
 /// directory to store data
 #define DATA_DIR "data/"
 
-char *progname;
+/// program name
+const char *progname;
 
 // utilities {{{
 
@@ -109,6 +110,10 @@ void myblas_sscal(int N, float alpha, float *X) {
 #if USE_BALS
     cblas_sscal(N, alpha, X, 1);
 #else
+    if (alpha == 1) {
+        return;
+    }
+
     for (int i = 0; i < N; ++i) {
         X[i] *= alpha;
     }
@@ -134,6 +139,10 @@ void myblas_saxpy(int N, float alpha, const float *X, float *Y) {
 #if USE_BLAS
     cblas_saxpy(N, alpha, X, 1, Y, 1);
 #else
+    if (alpha == 0) {
+        return;
+    }
+
     for (int i = 0; i < N; ++i) {
         Y[i] = fmaf(alpha, X[i], Y[i]);
     }
@@ -162,7 +171,13 @@ void myblas_sgemv(int M, int N, float alpha, const float *A, const float *X, flo
 #if USE_BLAS
     cblas_sgemv(CblasRowMajor, CblasNoTrans, M, N, alpha, A, N, X, 1, beta, Y, 1);
 #else
-    myblas_sscal(M, beta, Y);
+    if (beta != 1) {
+        myblas_sscal(M, beta, Y);
+    }
+    if (alpha == 0) {
+        return;
+    }
+
     for (int m = 0; m < M; ++m) {
         Y[m] = fmaf(alpha, myblas_sdot(N, &A[m * N], X), Y[m]);
     }
@@ -177,6 +192,10 @@ void myblas_sger(int M, int N, float alpha, const float *X, const float *Y, floa
 #if USE_BLAS
     cblas_sger(CblasRowMajor, M, N, alpha, X, 1, Y, 1, A, N);
 #else
+    if (alpha == 0) {
+        return;
+    }
+
     for (int m = 0; m < M; ++m) {
         for (int n = 0; n < N; ++n) {
             A[m * N + n] = fmaf(alpha, X[m] * Y[n], A[m * N + n]);
@@ -608,7 +627,7 @@ void mnist_save_images(void) {
 /// - x: n vector
 /// - W: m*n matrix
 /// - b: m vector
-void affine(
+static void affine(
   int m, int n, const float *restrict x, const float *restrict W, const float *restrict b,
   float *restrict y) {
     memcpy(y, b, m * sizeof(float));
@@ -624,7 +643,7 @@ void affine(
 /// - dW: m*n matrix
 /// - db: m vector
 /// - dx: n vector
-void affine_bwd(
+static void affine_bwd(
   int m, int n, const float *restrict x, const float *restrict W, const float *restrict dy,
   float *restrict dW, float *restrict db, float *restrict dx) {
     // dW = dy * x^{T}
@@ -648,20 +667,20 @@ void affine_bwd(
 }
 
 /// y_i = max(x_i, 0)
-void relu(int n, const float *restrict x, float *restrict y) {
+static void relu(int n, const float *restrict x, float *restrict y) {
     for (int i = 0; i < n; ++i) {
         y[i] = x[i] > 0 ? x[i] : 0;
     }
 }
 
-void relu_bwd(int n, const float *restrict x, const float *restrict dy, float *restrict dx) {
+static void relu_bwd(int n, const float *restrict x, const float *restrict dy, float *restrict dx) {
     for (int i = 0; i < n; ++i) {
         dx[i] = x[i] > 0 ? dy[i] : 0;
     }
 }
 
 /// y = exp(x .- max(x)) ./ sum(exp(x .- max(x)))
-void softmax(int n, const float *restrict x, float *restrict y) {
+static void softmax(int n, const float *restrict x, float *restrict y) {
     int idx = myblas_ismax(n, x);
     double tmp = 0;
     for (int i = 0; i < n; ++i) {
@@ -675,7 +694,7 @@ void softmax(int n, const float *restrict x, float *restrict y) {
 /// dx = y - t
 /// - y: n vector
 /// - t: n one-hot vector
-void softmax_with_loss_bwd(int n, const float *restrict y, int8_t t, float *restrict dx) {
+static void softmax_with_loss_bwd(int n, const float *restrict y, int8_t t, float *restrict dx) {
     for (int i = 0; i < n; ++i) {
         dx[i] = y[i] - (t == i ? 1 : 0);
     }
@@ -702,11 +721,12 @@ static inline double cross_entropy(const float *y, int8_t t) {
 
 #define BATCH_SIZE 100
 
-typedef enum Mode {
+enum Mode {
     kTrain,
     kInference,
     kSavePictures,
-} Mode;
+} mode;
+int verbose;
 
 typedef enum FileType {
     BMP,
@@ -731,7 +751,7 @@ static struct NetworkDim {
 } const dims[2 * LAYERS] = {{FC0_COLS, FC0_ROWS}, {FC0_ROWS, FC0_ROWS}, {FC1_COLS, FC1_ROWS},
                             {FC1_ROWS, FC1_ROWS}, {FC2_COLS, FC2_ROWS}, {FC2_ROWS, FC2_ROWS}};
 
-static void initialize(Mode mode) {
+static void initialize(void) {
     if (mode == kSavePictures) {
         return;
     }
@@ -752,7 +772,7 @@ static void initialize(Mode mode) {
     }
 }
 
-static void finalize(Mode mode) {
+static void finalize(void) {
     if (mode == kSavePictures) {
         return;
     }
@@ -810,7 +830,7 @@ static void save_param(const float *src, int len, const char *fname) {
     fclose(fp);
 }
 
-void random_shuffle(int n, float **x, int8_t *y) {
+static void random_shuffle(int n, float **x, int8_t *y) {
     for (int i = 0; i < n; ++i) {
         int idx = rand() / (RAND_MAX + 1.0) * n;
         SWAP(float *, x[i], x[idx]);
@@ -915,8 +935,8 @@ static Result inference(float *x, int8_t t) {
     double l;
     float *z[LAYERS * 2 + 1];
     z[0] = x;
-    for (int j = 0; j < 2 * LAYERS; ++j) {
-        z[j + 1] = malloc(dims[j].out * sizeof(float));
+    for (int i = 0; i < 2 * LAYERS; ++i) {
+        z[i + 1] = malloc(dims[i].out * sizeof(float));
     }
 
     affine(dims[0].out, dims[0].in, z[0], fc[0].W, fc[0].b, z[1]);
@@ -938,7 +958,7 @@ static Result inference(float *x, int8_t t) {
     return (Result){idx, c, l};
 }
 
-void train_main(int epochs, float eta, float decay, float alpha, int seed) {
+static void train_main(int epochs, float eta, float decay, float alpha, int seed) {
     float **train_x;
     int8_t *train_y;
     int train_count;
@@ -961,7 +981,9 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
 
     load_params();
 
-    printf("epoch,train_acc,train_loss,test_acc,test_loss\n");
+    if (verbose) {
+        printf("epoch,train_acc,train_loss,test_acc,test_loss\n");
+    }
     for (int e = 0; e < epochs; ++e) {
         int c = 0;
         double l = 0;
@@ -972,7 +994,9 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
             c += r.count;
             l += r.loss;
         }
-        printf("%d,%.4f,%.4f", e + 1, c / (double)MNIST_TRAIN_COUNT, l / MNIST_TRAIN_COUNT);
+        if (verbose) {
+            printf("%d,%.4f,%.4f", e + 1, c / (double)MNIST_TRAIN_COUNT, l / MNIST_TRAIN_COUNT);
+        }
 
         c = 0;
         l = 0;
@@ -984,7 +1008,9 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
             c += r.count;
             l += r.loss;
         }
-        printf(",%.4f,%.4f\n", c / (double)MNIST_TEST_COUNT, l / MNIST_TEST_COUNT);
+        if (verbose) {
+            printf(",%.4f,%.4f\n", c / (double)MNIST_TEST_COUNT, l / MNIST_TEST_COUNT);
+        }
     }
 
     save_params();
@@ -1007,9 +1033,28 @@ void train_main(int epochs, float eta, float decay, float alpha, int seed) {
     free(test_y);
 }
 
-void inference_from_file(char *fname) {
+static void display_image(int rows, int cols, const float *data) {
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            float tmp = data[i * cols + j];
+            if (tmp < 0.25) {
+                putchar(' ');
+            } else if (tmp < 0.5) {
+                putchar('.');
+            } else if (tmp < 0.75) {
+                putchar('+');
+            } else {
+                putchar('*');
+            }
+            putchar(' ');
+        }
+        putchar('\n');
+    }
+}
+
+static void inference_from_file(const char *fname) {
     FileType type;
-    char *ext = NULL;
+    const char *ext = NULL;
 
     for (int i = strlen(fname); i >= 0; --i) {
         if (fname[i] == '.') {
@@ -1042,18 +1087,22 @@ void inference_from_file(char *fname) {
 #endif
     }
 
-    printf("%d\n", inference(x, -1).idx);
+    if (verbose) {
+        display_image(MNIST_IMAGE_ROWS, MNIST_IMAGE_COLS, x);
+    }
+
+    printf("answer = %d\n", inference(x, 0).idx);
     free(x);
 }
 
-void inference_main(int argc, char **argv) {
+static void inference_main(int argc, char **argv) {
     load_params();
     for (int i = 0; i < argc; ++i) {
         inference_from_file(argv[i]);
     }
 }
 
-int print_usage(void) {
+static int print_usage(void) {
     fprintf(
       stderr,
       "Usage: %s [OPTION]... [FILE]...\n"
@@ -1067,30 +1116,34 @@ int print_usage(void) {
       "\nModes:\n"
       "  -i         inference from FILE;\n"
       "  -p         convert datasets to pictures\n"
-      "  -t         train (default mode)\n"
+      "  -t         train (this is default)\n"
       "\nParameters:\n"
-      "  -d NUMBER  decay for learning rate (default is 1e-6)\n"
-      "  -m NUMBER  momentum (default is 0.9)\n"
-      "  -n NUMBER  number of epochs (default is 10)\n"
-      "  -r NUMBER  learning rate (default is 0.01)\n"
-      "  -s NUMBER  seed for random number (default is 1)\n"
+      "  -d NUMBER  decay for learning rate (default: 1e-6)\n"
+      "  -m NUMBER  momentum (default: 0.9)\n"
+      "  -n NUMBER  number of epochs (default: 10)\n"
+      "  -r NUMBER  learning rate (default: 0.01)\n"
+      "  -s NUMBER  seed for random number (default: 1)\n"
       "\n"
+      "  -v         verbose (default: on)\n"
+      "  -q         suppress output\n"
       "  -h         display this help and exit\n",
       progname);
     return 1;
 }
 
 int main(int argc, char **argv) {
+    static const char *opts = "d:ihm:n:pqr:s:tv";
     int epochs = 10;
     float eta = 0.01;
     float decay = 1e-6;
     float alpha = 0.9;
     unsigned seed = 1;
-    Mode mode = kTrain;
+    mode = kTrain;
+    verbose = 1;
     progname = argv[0];
 
     int c;
-    while ((c = getopt(argc, argv, "d:ihm:n:pr:s:t")) != -1) {
+    while ((c = getopt(argc, argv, opts)) != -1) {
         switch (c) {
         case 'd':
             decay = strtof(optarg, NULL);
@@ -1107,6 +1160,9 @@ int main(int argc, char **argv) {
         case 'p':
             mode = kSavePictures;
             break;
+        case 'q':
+            verbose = 0;
+            break;
         case 'r':
             eta = strtof(optarg, NULL);
             break;
@@ -1116,12 +1172,15 @@ int main(int argc, char **argv) {
         case 't':
             mode = kTrain;
             break;
+        case 'v':
+            verbose = 1;
+            break;
         default:
             return print_usage();
         }
     }
 
-    initialize(mode);
+    initialize();
 
     switch (mode) {
     case kTrain:
@@ -1134,7 +1193,7 @@ int main(int argc, char **argv) {
         mnist_save_images();
     }
 
-    finalize(mode);
+    finalize();
 
     return 0;
 }
