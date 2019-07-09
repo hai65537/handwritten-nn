@@ -985,13 +985,13 @@ static void train_main(int epochs, float eta, float decay, float alpha, int seed
     if (verbose) {
         printf("epoch,train_acc,train_loss,test_acc,test_loss\n");
     }
-    for (int e = 0; e < epochs; ++e) {
+    for (int e = 0; e < epochs; ++e, eta *= 1 - decay) {
         int c = 0;
         double l = 0;
         random_shuffle(train_count, train_x, train_y);
         for (int i = 0; i < MNIST_TRAIN_COUNT / BATCH_SIZE; ++i) {
-            Result r = minibatch_train(
-              train_x + i * BATCH_SIZE, train_y + i * BATCH_SIZE, eta - decay * e, alpha);
+            Result r
+              = minibatch_train(train_x + i * BATCH_SIZE, train_y + i * BATCH_SIZE, eta, alpha);
             c += r.count;
             l += r.loss;
         }
@@ -1121,14 +1121,15 @@ static int print_usage(void) {
       "  -t         train (this is default)\n"
       "\n"
       "Parameters:\n"
-      "  -d NUMBER  decay for learning rate (default: 1e-6)\n"
+      "  -d NUMBER  decay rate of learning rate (default: 0.05)\n"
       "  -m NUMBER  momentum (default: 0.9)\n"
       "  -n NUMBER  number of epochs (default: 10)\n"
-      "  -r NUMBER  learning rate (default: 0.01)\n"
+      "  -r NUMBER  learning rate (default: 0.1)\n"
       "  -s NUMBER  seed for random number (default: 1)\n"
       "\n"
       "  -v         verbose (default: on)\n"
       "  -q         suppress output\n"
+      "\n"
       "  -h         display this help and exit\n",
       progname);
     return 1;
@@ -1137,8 +1138,8 @@ static int print_usage(void) {
 int main(int argc, char **argv) {
     static const char *opts = "d:ihm:n:pqr:s:tv";
     int epochs = 10;
-    float eta = 0.01;
-    float decay = 1e-6;
+    float eta = 0.1;
+    float decay = 0.05;
     float alpha = 0.9;
     unsigned seed = 1;
     mode = kTrain;
